@@ -1,0 +1,11 @@
+ticker,price,rsi_14,signal,1w_chg%,1m_chg%
+MSFT,373.46,40.3,neutral,4.7,-9.1
+META,574.46,41.3,neutral,9.3,-13.0
+BRK-B,477.35,41.9,neutral,1.9,-4.6
+V,300.8,42.0,neutral,1.8,-5.9
+GOOGL,295.77,47.4,neutral,7.8,-1.6
+NVDA,177.39,48.9,neutral,5.9,-3.2
+TSM,339.04,49.1,neutral,3.8,-3.9
+AAPL,255.92,49.4,neutral,2.9,-1.7
+AMZN,209.77,50.8,neutral,5.2,-4.2
+JPM,294.6,51.9,neutral,4.2,0.4
