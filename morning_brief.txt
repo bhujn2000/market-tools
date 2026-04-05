@@ -1,0 +1,70 @@
+```json
+{
+  "market_mood": "mixed",
+  "key_observation": "Broad recovery week (all green 1W) but monthly losses persist, suggesting a relief rally within a correction.",
+  "watchlist": [
+    {
+      "ticker": "GOOGL",
+      "rsi": 47.4,
+      "stance": "bullish",
+      "one_line": "Strongest 1M hold (-1.6%) with solid 7.8% weekly bounce signals relative strength."
+    },
+    {
+      "ticker": "JPM",
+      "rsi": 51.9,
+      "stance": "bullish",
+      "one_line": "Only stock positive on 1M; highest RSI reflects defensive leadership."
+    },
+    {
+      "ticker": "AAPL",
+      "rsi": 49.4,
+      "stance": "neutral",
+      "one_line": "Mild 1M drawdown and balanced RSI; steady but lacks catalyst."
+    },
+    {
+      "ticker": "NVDA",
+      "rsi": 48.9,
+      "stance": "neutral",
+      "one_line": "Decent weekly bounce but still digesting prior selloff; wait for RSI breakout."
+    },
+    {
+      "ticker": "AMZN",
+      "rsi": 50.8,
+      "stance": "neutral",
+      "one_line": "Midrange RSI and moderate recovery; no strong directional edge yet."
+    },
+    {
+      "ticker": "TSM",
+      "rsi": 49.1,
+      "stance": "neutral",
+      "one_line": "Semiconductor peer tracking NVDA; neutral until trade/tariff clarity emerges."
+    },
+    {
+      "ticker": "MSFT",
+      "rsi": 40.3,
+      "stance": "bullish",
+      "one_line": "Lowest RSI with 4.7% weekly pop; oversold bounce setup if support holds."
+    },
+    {
+      "ticker": "V",
+      "rsi": 42.0,
+      "stance": "neutral",
+      "one_line": "Low RSI but weak weekly recovery; needs consumer spending data for direction."
+    },
+    {
+      "ticker": "BRK-B",
+      "rsi": 41.9,
+      "stance": "neutral",
+      "one_line": "Defensive name yet weak bounce; limited upside catalyst near term."
+    },
+    {
+      "ticker": "META",
+      "rsi": 41.3,
+      "stance": "bearish",
+      "one_line": "Deepest 1M loss (-13%); strong weekly bounce may be a dead-cat rally."
+    }
+  ],
+  "top_opportunity": "MSFT and GOOGL: depressed RSIs with strong weekly recoveries offer mean-reversion entries.",
+  "top_risk": "META's -13% monthly plunge may resume; low RSI alone isn't a buy signal."
+}
+```
