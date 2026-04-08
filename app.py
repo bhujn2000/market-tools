@@ -27,7 +27,9 @@ if run_button:
         rows = []
         for ticker in tickers:
             try:
-                data = yf.download(ticker, period="3mo", auto_adjust=True, progress=False)
+                stock = yf.Ticker(ticker)
+                info = stock.info
+                data = stock.history(period="3mo", auto_adjust=True)
                 close = data["Close"].squeeze()
                 rsi = ta.rsi(close, length=14)
                 current_rsi = round(rsi.iloc[-1], 1)
@@ -35,6 +37,14 @@ if run_button:
                 change_1w = round((close.iloc[-1] / close.iloc[-5] - 1) * 100, 1)
                 change_1m = round((close.iloc[-1] / close.iloc[-21] - 1) * 100, 1)
                 signal = "oversold" if current_rsi < 30 else "overbought" if current_rsi > 70 else "neutral"
+
+                pe = info.get("forwardPE")
+                gross_margin = info.get("grossMargins")
+                rev_growth = info.get("revenueGrowth")
+                fcf = info.get("freeCashflow")
+                analyst_target = info.get("targetMeanPrice")
+                upside = round((analyst_target - current_price) / current_price * 100, 1) if analyst_target else None
+
                 rows.append({
                     "ticker": ticker,
                     "price": current_price,
@@ -42,6 +52,11 @@ if run_button:
                     "signal": signal,
                     "1w_chg%": float(change_1w),
                     "1m_chg%": float(change_1m),
+                    "fwd_pe": round(pe, 1) if pe else None,
+                    "gross_margin%": round(gross_margin * 100, 1) if gross_margin else None,
+                    "rev_growth%": round(rev_growth * 100, 1) if rev_growth else None,
+                    "fcf_B": round(fcf / 1e9, 1) if fcf else None,
+                    "upside%": upside,
                 })
             except Exception as e:
                 st.warning(f"Could not fetch {ticker}: {e}")
@@ -55,8 +70,8 @@ if run_button:
     with st.spinner("Asking Claude..."):
         data_summary = df_sorted.to_string()
         prompt = f"""
-You are a concise market analyst. I will give you RSI and price
-change data for a watchlist of stocks.
+You are a concise market analyst. I will give you RSI, price change,
+and fundamental data for a watchlist of stocks.
 
 Analyze this data and return ONLY a JSON object with no markdown:
 
@@ -76,10 +91,11 @@ Analyze this data and return ONLY a JSON object with no markdown:
 }}
 
 Rules:
-- one_line max 15 words
+- one_line max 15 words — reference both momentum AND valuation where relevant
 - key_observation max 25 words
 - top_opportunity and top_risk max 20 words each
-- rank watchlist by conviction, highest first
+- rank watchlist by conviction, highest first — weight cheap+oversold highest
+- flag any stock where upside% > 30 and rsi < 45 as high conviction
 - return raw JSON only, no backticks, no markdown
 
 Data:
@@ -120,7 +136,6 @@ Data:
                 close = hist["Close"].squeeze()
 
                 fig = go.Figure()
-
                 fig.add_trace(go.Scatter(
                     x=close.index,
                     y=close.values.flatten(),
