@@ -9,9 +9,110 @@ import plotly.graph_objects as go
 from dotenv import load_dotenv
 from fredapi import Fred
 import os
+import json as jsonlib
 
 load_dotenv()
 client = anthropic.Anthropic()
+
+def find_pivots(close, window=5):
+    highs = []
+    lows = []
+    prices = close.values
+    dates = close.index
+
+    for i in range(window, len(prices) - window):
+        if all(prices[i] >= prices[i-j] for j in range(1, window+1)) and \
+           all(prices[i] >= prices[i+j] for j in range(1, window+1)):
+            highs.append({"date": str(dates[i].date()), "price": round(float(prices[i]), 2)})
+
+        if all(prices[i] <= prices[i-j] for j in range(1, window+1)) and \
+           all(prices[i] <= prices[i+j] for j in range(1, window+1)):
+            lows.append({"date": str(dates[i].date()), "price": round(float(prices[i]), 2)})
+
+    return highs[-6:], lows[-6:]
+
+
+def analyze_pattern(ticker, close, highs, lows):
+    current_price = round(float(close.iloc[-1]), 2)
+
+    high_prices = [h["price"] for h in highs]
+    low_prices = [l["price"] for l in lows]
+
+    structure = ""
+    if len(high_prices) >= 2:
+        if high_prices[-1] < high_prices[-2] * 0.995:
+            structure += "lower highs forming. "
+        elif high_prices[-1] > high_prices[-2] * 1.005:
+            structure += "higher highs forming. "
+        else:
+            structure += "equal highs (within 0.5%). "
+
+    if len(low_prices) >= 2:
+        if low_prices[-1] > low_prices[-2] * 1.005:
+            structure += "higher lows forming. "
+        elif low_prices[-1] < low_prices[-2] * 0.995:
+            structure += "lower lows forming. "
+        else:
+            structure += "equal lows (within 0.5%). "
+
+    prompt = f"""
+You are a technical analyst. Analyze this price structure data and identify the most likely chart pattern.
+
+Ticker: {ticker}
+Current price: {current_price}
+3-month price range: {round(float(close.min()), 2)} - {round(float(close.max()), 2)}
+Price structure: {structure}
+Recent pivot highs (last 6): {highs}
+Recent pivot lows (last 6): {lows}
+
+Patterns to consider: double top, double bottom, head and shoulders, inverse head and shoulders,
+ascending triangle, descending triangle, symmetrical triangle, rising wedge, falling wedge,
+cup and handle, flag, pennant, or no clear pattern.
+
+Return ONLY this JSON with no markdown:
+{{
+  "pattern": "",
+  "confidence": "high / medium / low",
+  "key_levels": {{
+    "resistance": 0,
+    "support": 0,
+    "target": 0
+  }},
+  "implication": "bullish / bearish / neutral",
+  "reasoning": "",
+  "invalidation": ""
+}}
+
+Rules:
+- reasoning max 20 words
+- invalidation max 15 words
+- target should be a realistic price projection based on the pattern
+- if no clear pattern exists, set pattern to "no clear pattern" and confidence to "low"
+- return raw JSON only
+"""
+
+    message = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=500,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    response = message.content[0].text
+    clean = re.sub(r"```json|```", "", response).strip()
+    return json.loads(clean)
+
+
+WATCHLIST_FILE = "watchlist.json"
+
+def load_watchlist():
+    if os.path.exists(WATCHLIST_FILE):
+        with open(WATCHLIST_FILE, "r") as f:
+            return jsonlib.load(f).get("tickers", "GRAB, TSM, PFE, CLS, CDE, UNFI, LITE")
+    return "GRAB, TSM, PFE, CLS, CDE, UNFI, LITE"
+
+def save_watchlist(tickers_str):
+    with open(WATCHLIST_FILE, "w") as f:
+        jsonlib.dump({"tickers": tickers_str}, f)
+
 
 st.set_page_config(page_title="Morning Brief", layout="wide")
 st.title("Morning Brief")
@@ -19,9 +120,10 @@ st.caption("RSI signals + Claude analysis for your watchlist")
 
 with st.sidebar:
     st.header("Watchlist")
-    default_tickers = default_tickers = "GRAB, TSM, PFE, CLS, CDE, UNFI, LITE"
-    ticker_input = st.text_area("Tickers (comma separated)", value=default_tickers, height=150)
+    ticker_input = st.text_area("Tickers (comma separated)", value=load_watchlist(), height=150)
     run_button = st.button("Run Analysis", type="primary", use_container_width=True)
+    if run_button:
+        save_watchlist(ticker_input)
 
 tab1, tab2 = st.tabs(["Watchlist", "Macro"])
 
@@ -52,13 +154,13 @@ with tab2:
             }
 
             macro_rows = {}
-        for label, code in series.items():
-            s = get_latest(code)
-            if not s.empty:
-                if label in ["CPI YoY", "Core PCE YoY"]:
-                    s = s.pct_change(12) * 100
-                    s = s.dropna()
-                macro_rows[label] = s
+            for label, code in series.items():
+                s = get_latest(code)
+                if not s.empty:
+                    if label in ["CPI YoY", "Core PCE YoY"]:
+                        s = s.pct_change(12) * 100
+                        s = s.dropna()
+                    macro_rows[label] = s
 
         macro_df = pd.DataFrame(macro_rows)
         macro_df.index = pd.to_datetime(macro_df.index)
@@ -241,8 +343,8 @@ with tab1:
             df = pd.DataFrame(rows).set_index("ticker")
             df_sorted = df.sort_values("rsi_14", ascending=True)
 
-        st.subheader("Market Data")
-        st.dataframe(df_sorted, use_container_width=True)
+        st.session_state["df_sorted"] = df_sorted
+        st.session_state["tickers"] = tickers
 
         with st.spinner("Asking Claude..."):
             data_summary = df_sorted.to_string()
@@ -286,6 +388,15 @@ Data:
             response = message.content[0].text
             clean = re.sub(r"```json|```", "", response).strip()
             parsed = json.loads(clean)
+            st.session_state["parsed"] = parsed
+
+    if "df_sorted" in st.session_state and "parsed" in st.session_state:
+        df_sorted = st.session_state["df_sorted"]
+        parsed = st.session_state["parsed"]
+        tickers = st.session_state.get("tickers", tickers)
+
+        st.subheader("Market Data")
+        st.dataframe(df_sorted, use_container_width=True)
 
         st.subheader("Claude's Analysis")
         col1, col2, col3 = st.columns(3)
@@ -337,6 +448,83 @@ Data:
                         showlegend=False,
                     )
                     st.plotly_chart(fig, use_container_width=True)
+
+                    if st.button(f"Detect pattern — {ticker}", key=f"pattern_{ticker}"):
+                        with st.spinner("Analyzing price structure..."):
+                            try:
+                                highs, lows = find_pivots(close)
+                                result = analyze_pattern(ticker, close, highs, lows)
+                                st.session_state[f"pattern_result_{ticker}"] = {
+                                    "result": result,
+                                    "highs": highs,
+                                    "lows": lows,
+                                    "close_min": float(close.min()),
+                                    "close_max": float(close.max()),
+                                    "close_index": [str(x) for x in close.index],
+                                    "close_values": close.values.flatten().tolist(),
+                                }
+                            except Exception as e:
+                                st.warning(f"Pattern detection failed: {e}")
+
+                    if f"pattern_result_{ticker}" in st.session_state:
+                        cached = st.session_state[f"pattern_result_{ticker}"]
+                        result = cached["result"]
+                        highs = cached["highs"]
+                        lows = cached["lows"]
+
+                        pattern = result["pattern"]
+                        confidence = result["confidence"]
+                        implication = result["implication"]
+
+                        color = "🟢" if implication == "bullish" else "🔴" if implication == "bearish" else "🟡"
+                        conf_color = {"high": "🔵", "medium": "🟠", "low": "⚪"}.get(confidence, "⚪")
+
+                        st.markdown(f"### {color} {pattern.title()}")
+                        st.caption(f"{conf_color} Confidence: {confidence}   |   Implication: {implication}")
+                        st.write(result["reasoning"])
+
+                        k1, k2, k3 = st.columns(3)
+                        with k1:
+                            st.metric("Resistance", f"${result['key_levels']['resistance']}")
+                        with k2:
+                            st.metric("Support", f"${result['key_levels']['support']}")
+                        with k3:
+                            st.metric("Target", f"${result['key_levels']['target']}")
+
+                        st.caption(f"Invalidation: {result['invalidation']}")
+
+                        fig_pattern = go.Figure()
+                        fig_pattern.add_trace(go.Scatter(
+                            x=cached["close_index"],
+                            y=cached["close_values"],
+                            name=ticker,
+                            line=dict(width=1.5),
+                            fill="tozeroy",
+                            fillcolor="rgba(99, 110, 250, 0.08)"
+                        ))
+                        fig_pattern.add_trace(go.Scatter(
+                            x=[h["date"] for h in highs],
+                            y=[h["price"] for h in highs],
+                            mode="markers",
+                            marker=dict(color="red", size=8, symbol="triangle-down"),
+                            name="Pivot highs"
+                        ))
+                        fig_pattern.add_trace(go.Scatter(
+                            x=[l["date"] for l in lows],
+                            y=[l["price"] for l in lows],
+                            mode="markers",
+                            marker=dict(color="green", size=8, symbol="triangle-up"),
+                            name="Pivot lows"
+                        ))
+                        fig_pattern.update_layout(
+                            height=320,
+                            margin=dict(l=0, r=0, t=40, b=0),
+                            yaxis_title="Price (USD)",
+                            yaxis=dict(range=[cached["close_min"] * 0.95, cached["close_max"] * 1.05]),
+                            hovermode="x unified",
+                            title=f"{ticker} — {pattern.title()}",
+                        )
+                        st.plotly_chart(fig_pattern, use_container_width=True)
 
                 except Exception as e:
                     st.warning(f"Chart unavailable for {ticker}: {e}")
