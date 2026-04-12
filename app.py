@@ -416,17 +416,27 @@ Data:
         for i, ticker in enumerate(tickers):
             with chart_tabs[i]:
                 try:
-                    hist = yf.download(ticker, period="3mo", auto_adjust=True, progress=False)
+                    period_options = {"1W": "5d", "1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y", "2Y": "2y"}
+                    selected_period = st.radio(
+                        "Time range",
+                        options=list(period_options.keys()),
+                        index=2,
+                        horizontal=True,
+                        key=f"period_{ticker}"
+                    )
+                    hist = yf.download(ticker, period=period_options[selected_period], auto_adjust=True, progress=False)
                     close = hist["Close"].squeeze()
 
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=close.index,
-                        y=close.values.flatten(),
+                    fig.add_trace(go.Candlestick(
+                        x=hist.index,
+                        open=hist["Open"].squeeze(),
+                        high=hist["High"].squeeze(),
+                        low=hist["Low"].squeeze(),
+                        close=hist["Close"].squeeze(),
                         name=ticker,
-                        line=dict(width=1.5),
-                        fill="tozeroy",
-                        fillcolor="rgba(99, 110, 250, 0.08)"
+                        increasing_line_color="rgba(0, 200, 100, 0.8)",
+                        decreasing_line_color="rgba(220, 50, 50, 0.8)",
                     ))
 
                     ticker_row = df_sorted.loc[ticker] if ticker in df_sorted.index else None
@@ -444,6 +454,7 @@ Data:
                         xaxis_title=None,
                         yaxis_title="Price (USD)",
                         yaxis=dict(range=[close.min() * 0.95, close.max() * 1.05]),
+                        xaxis_rangeslider_visible=False,
                         hovermode="x unified",
                         showlegend=False,
                     )
@@ -460,8 +471,11 @@ Data:
                                     "lows": lows,
                                     "close_min": float(close.min()),
                                     "close_max": float(close.max()),
-                                    "close_index": [str(x) for x in close.index],
+                                    "close_index": [str(x) for x in hist.index],
                                     "close_values": close.values.flatten().tolist(),
+                                    "open_values": hist["Open"].squeeze().values.flatten().tolist(),
+                                    "high_values": hist["High"].squeeze().values.flatten().tolist(),
+                                    "low_values": hist["Low"].squeeze().values.flatten().tolist(),
                                 }
                             except Exception as e:
                                 st.warning(f"Pattern detection failed: {e}")
@@ -494,13 +508,15 @@ Data:
                         st.caption(f"Invalidation: {result['invalidation']}")
 
                         fig_pattern = go.Figure()
-                        fig_pattern.add_trace(go.Scatter(
+                        fig_pattern.add_trace(go.Candlestick(
                             x=cached["close_index"],
-                            y=cached["close_values"],
+                            open=cached["open_values"],
+                            high=cached["high_values"],
+                            low=cached["low_values"],
+                            close=cached["close_values"],
                             name=ticker,
-                            line=dict(width=1.5),
-                            fill="tozeroy",
-                            fillcolor="rgba(99, 110, 250, 0.08)"
+                            increasing_line_color="rgba(0, 200, 100, 0.8)",
+                            decreasing_line_color="rgba(220, 50, 50, 0.8)",
                         ))
                         fig_pattern.add_trace(go.Scatter(
                             x=[h["date"] for h in highs],
@@ -521,6 +537,7 @@ Data:
                             margin=dict(l=0, r=0, t=40, b=0),
                             yaxis_title="Price (USD)",
                             yaxis=dict(range=[cached["close_min"] * 0.95, cached["close_max"] * 1.05]),
+                            xaxis_rangeslider_visible=False,
                             hovermode="x unified",
                             title=f"{ticker} — {pattern.title()}",
                         )
