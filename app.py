@@ -6,6 +6,7 @@ import anthropic
 import json
 import re
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from dotenv import load_dotenv
 from fredapi import Fred
 import os
@@ -427,7 +428,20 @@ Data:
                     hist = yf.download(ticker, period=period_options[selected_period], auto_adjust=True, progress=False)
                     close = hist["Close"].squeeze()
 
-                    fig = go.Figure()
+                    sma_col1, sma_col2, sma_col3 = st.columns(3)
+                    with sma_col1:
+                        show_sma_short = st.checkbox("SMA 20 (short)", value=True, key=f"sma_short_{ticker}")
+                    with sma_col2:
+                        show_sma_mid = st.checkbox("SMA 50 (mid)", value=True, key=f"sma_mid_{ticker}")
+                    with sma_col3:
+                        show_sma_long = st.checkbox("SMA 200 (long)", value=True, key=f"sma_long_{ticker}")
+
+                    fig = make_subplots(
+                        rows=2, cols=1,
+                        shared_xaxes=True,
+                        row_heights=[0.72, 0.28],
+                        vertical_spacing=0.03
+                    )
                     fig.add_trace(go.Candlestick(
                         x=hist.index,
                         open=hist["Open"].squeeze(),
@@ -437,7 +451,47 @@ Data:
                         name=ticker,
                         increasing_line_color="rgba(0, 200, 100, 0.8)",
                         decreasing_line_color="rgba(220, 50, 50, 0.8)",
-                    ))
+                    ), row=1, col=1)
+
+                    if show_sma_short and len(close) >= 20:
+                        sma20 = close.rolling(20).mean()
+                        fig.add_trace(go.Scatter(
+                            x=hist.index, y=sma20.values,
+                            name="SMA 20",
+                            line=dict(color="rgba(255, 200, 0, 0.8)", width=1.2),
+                            hovertemplate="%{y:.2f}"
+                        ), row=1, col=1)
+
+                    if show_sma_mid and len(close) >= 50:
+                        sma50 = close.rolling(50).mean()
+                        fig.add_trace(go.Scatter(
+                            x=hist.index, y=sma50.values,
+                            name="SMA 50",
+                            line=dict(color="rgba(0, 180, 255, 0.8)", width=1.2),
+                            hovertemplate="%{y:.2f}"
+                        ), row=1, col=1)
+
+                    if show_sma_long and len(close) >= 200:
+                        sma200 = close.rolling(200).mean()
+                        fig.add_trace(go.Scatter(
+                            x=hist.index, y=sma200.values,
+                            name="SMA 200",
+                            line=dict(color="rgba(255, 100, 200, 0.8)", width=1.2),
+                            hovertemplate="%{y:.2f}"
+                        ), row=1, col=1)
+
+                    volume = hist["Volume"].squeeze()
+                    vol_colors = [
+                        "rgba(0, 200, 100, 0.5)" if c >= o else "rgba(220, 50, 50, 0.5)"
+                        for c, o in zip(hist["Close"].squeeze(), hist["Open"].squeeze())
+                    ]
+                    fig.add_trace(go.Bar(
+                        x=hist.index,
+                        y=volume,
+                        name="Volume",
+                        marker_color=vol_colors,
+                        showlegend=False,
+                    ), row=2, col=1)
 
                     ticker_row = df_sorted.loc[ticker] if ticker in df_sorted.index else None
                     if ticker_row is not None:
@@ -449,15 +503,17 @@ Data:
                         )
 
                     fig.update_layout(
-                        height=320,
+                        height=480,
                         margin=dict(l=0, r=0, t=40, b=0),
-                        xaxis_title=None,
                         yaxis_title="Price (USD)",
                         yaxis=dict(range=[close.min() * 0.95, close.max() * 1.05]),
-                        xaxis_rangeslider_visible=False,
+                        yaxis2_title="Volume",
+                        xaxis2_rangeslider_visible=False,
                         hovermode="x unified",
-                        showlegend=False,
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="left", x=0)
                     )
+                    fig.update_xaxes(rangeslider_visible=False)
                     st.plotly_chart(fig, use_container_width=True)
 
                     if st.button(f"Detect pattern — {ticker}", key=f"pattern_{ticker}"):
