@@ -1,6 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import time
 import anthropic
 import json
 import re
@@ -525,6 +526,7 @@ with tab1:
                     })
                 except Exception as e:
                     st.warning(f"Could not fetch {ticker}: {e}")
+                time.sleep(1)
 
             if not rows:
                 st.error("No data could be fetched. You may be rate limited — wait a moment and try again.")
