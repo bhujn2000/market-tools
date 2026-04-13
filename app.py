@@ -13,6 +13,13 @@ import os
 import json as jsonlib
 
 load_dotenv()
+
+# Streamlit Cloud: load secrets into env vars if present
+if "ANTHROPIC_API_KEY" in st.secrets:
+    os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
+if "FRED_API_KEY" in st.secrets:
+    os.environ["FRED_API_KEY"] = st.secrets["FRED_API_KEY"]
+
 client = anthropic.Anthropic()
 
 def find_pivots(close, window=5):
