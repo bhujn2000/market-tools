@@ -824,15 +824,68 @@ with tab3:
             cat_results = [r for r in results if r["category"] == cat]
             if not cat_results:
                 continue
-            st.markdown(f"**{cat}**")
+            cat_passes = sum(1 for r in cat_results if r["result"] == "PASS")
+            st.subheader(f"{cat} — {cat_passes}/{len(cat_results)}")
             for r in cat_results:
-                icon = "✅" if r["result"] == "PASS" else "🚩"
+                icon = "✅" if r["result"] == "PASS" else "❌"
                 with st.expander(f"{icon} {r['test']} — {r['value']}"):
                     st.write(r["reason"])
 
         flag_list = [r for r in results if r["result"] == "FLAG"]
-        if flag_list:
-            st.markdown("---")
-            st.markdown("**Flags to investigate**")
-            for r in flag_list:
-                st.warning(f"**{r['test']}**: {r['reason']}")
+
+        with st.spinner("Claude's interpretation..."):
+            flags_str = "\n".join([f"- {r['test']}: {r['reason']}" for r in flag_list]) if flag_list else "None"
+            passes_str = "\n".join([f"- {r['test']}: {r['reason']}" for r in results if r["result"] == "PASS"])
+
+            health_prompt = f"""
+You are a financial analyst reviewing a health scorecard for {done_ticker}.
+
+Score: {passes}/{total} tests passed ({score}%)
+
+Tests passed:
+{passes_str}
+
+Flags:
+{flags_str}
+
+Return ONLY this JSON with no markdown:
+{{
+  "overall_verdict": "healthy / adequate / concerning",
+  "key_strength": "",
+  "key_concern": "",
+  "context": "",
+  "investor_takeaway": ""
+}}
+
+Rules:
+- key_strength max 20 words
+- key_concern max 20 words
+- context max 30 words — explain any flags that have benign explanations
+- investor_takeaway max 25 words
+- return raw JSON only
+"""
+            health_message = client.messages.create(
+                model="claude-opus-4-6",
+                max_tokens=600,
+                messages=[{"role": "user", "content": health_prompt}]
+            )
+            health_response = health_message.content[0].text
+            health_clean = re.sub(r"```json|```", "", health_response).strip()
+            health_parsed = json.loads(health_clean)
+
+        st.subheader("Claude's interpretation")
+
+        verdict = health_parsed["overall_verdict"]
+        verdict_color = "🟢" if verdict == "healthy" else "🟡" if verdict == "adequate" else "🔴"
+        st.metric("Verdict", f"{verdict_color} {verdict.title()}")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.caption("Key strength")
+            st.write(health_parsed["key_strength"])
+        with c2:
+            st.caption("Key concern")
+            st.write(health_parsed["key_concern"])
+
+        st.info(health_parsed["context"])
+        st.success(health_parsed["investor_takeaway"])
