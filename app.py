@@ -14,10 +14,13 @@ import json as jsonlib
 load_dotenv()
 
 # Streamlit Cloud: load secrets into env vars if present
-if "ANTHROPIC_API_KEY" in st.secrets:
-    os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
-if "FRED_API_KEY" in st.secrets:
-    os.environ["FRED_API_KEY"] = st.secrets["FRED_API_KEY"]
+try:
+    if "ANTHROPIC_API_KEY" in st.secrets:
+        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
+    if "FRED_API_KEY" in st.secrets:
+        os.environ["FRED_API_KEY"] = st.secrets["FRED_API_KEY"]
+except Exception:
+    pass
 
 client = anthropic.Anthropic()
 
