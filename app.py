@@ -526,6 +526,9 @@ with tab1:
                 except Exception as e:
                     st.warning(f"Could not fetch {ticker}: {e}")
 
+            if not rows:
+                st.error("No data could be fetched. You may be rate limited — wait a moment and try again.")
+                st.stop()
             df = pd.DataFrame(rows).set_index("ticker")
             df_sorted = df.sort_values("rsi_14", ascending=True)
 
