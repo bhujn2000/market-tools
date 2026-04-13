@@ -1,7 +1,6 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import anthropic
 import json
 import re
@@ -491,7 +490,10 @@ with tab1:
                     info = stock.info
                     data = stock.history(period="3mo", auto_adjust=True)
                     close = data["Close"].squeeze()
-                    rsi = ta.rsi(close, length=14)
+                    delta = close.diff()
+                    gain = delta.clip(lower=0).ewm(com=13, min_periods=14).mean()
+                    loss = -delta.clip(upper=0).ewm(com=13, min_periods=14).mean()
+                    rsi = 100 - (100 / (1 + gain / loss))
                     current_rsi = round(rsi.iloc[-1], 1)
                     current_price = round(float(close.iloc[-1]), 2)
                     change_1w = round((close.iloc[-1] / close.iloc[-5] - 1) * 100, 1)

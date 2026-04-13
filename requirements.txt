@@ -1,7 +1,6 @@
 streamlit==1.56.0
 yfinance==1.2.0
 pandas==3.0.2
-pandas-ta
 anthropic==0.89.0
 plotly==6.6.0
 python-dotenv==1.2.2
