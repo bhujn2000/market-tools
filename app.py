@@ -115,6 +115,179 @@ def save_watchlist(tickers_str):
         jsonlib.dump({"tickers": tickers_str}, f)
 
 
+def get_value(df, keys):
+    for key in keys:
+        if key in df.index:
+            row = df.loc[key].dropna()
+            if not row.empty:
+                return row
+    return pd.Series(dtype=float)
+
+def run_health_checks(ticker):
+    stock = yf.Ticker(ticker)
+    fin = stock.financials
+    cf = stock.cashflow
+    bs = stock.balance_sheet
+
+    results = []
+
+    def check(name, category, passed, value_str, reason):
+        results.append({
+            "test": name,
+            "category": category,
+            "result": "PASS" if passed else "FLAG",
+            "value": value_str,
+            "reason": reason
+        })
+
+    # --- PROFITABILITY ---
+    gross_profit = get_value(fin, ["Gross Profit"])
+    revenue = get_value(fin, ["Total Revenue"])
+    operating_income = get_value(fin, ["Operating Income"])
+    net_income = get_value(fin, ["Net Income"])
+
+    if len(gross_profit) >= 3 and len(revenue) >= 3:
+        gm = (gross_profit / revenue * 100).iloc[:3]
+        gm_change = gm.iloc[0] - gm.iloc[2]
+        passed = gm_change > -3
+        check("Gross margin consistency", "Profitability", passed,
+              f"{gm.iloc[0]:.1f}% vs {gm.iloc[2]:.1f}% (3Y ago)",
+              "Gross margin stable or improving" if passed else f"Gross margin declined {abs(gm_change):.1f}pp over 3 years")
+
+    if len(operating_income) >= 3 and len(revenue) >= 3:
+        om = (operating_income / revenue * 100).iloc[:3]
+        passed = om.iloc[0] >= om.iloc[2]
+        check("Operating margin trend", "Profitability", passed,
+              f"{om.iloc[0]:.1f}% vs {om.iloc[2]:.1f}% (3Y ago)",
+              "Operating margin expanding" if passed else "Operating margin compressing")
+
+    if len(net_income) >= 3 and len(revenue) >= 3:
+        nm = (net_income / revenue * 100).iloc[:3]
+        passed = nm.iloc[0] >= nm.iloc[2] - 2
+        check("Net margin trend", "Profitability", passed,
+              f"{nm.iloc[0]:.1f}% vs {nm.iloc[2]:.1f}% (3Y ago)",
+              "Net margin stable or improving" if passed else "Net margin declining")
+
+    # --- GROWTH ---
+    if len(revenue) >= 3:
+        rev = revenue.iloc[:3]
+        yr1_growth = (rev.iloc[0] - rev.iloc[1]) / rev.iloc[1] * 100
+        yr2_growth = (rev.iloc[1] - rev.iloc[2]) / rev.iloc[2] * 100
+        no_down_years = all(r > 0 for r in [yr1_growth, yr2_growth])
+        check("Revenue growth consistency", "Growth", no_down_years,
+              f"Y1: {yr1_growth:.1f}%, Y2: {yr2_growth:.1f}%",
+              "No down years in revenue" if no_down_years else "Revenue declined in at least one year")
+
+        avg_prior = (yr1_growth + yr2_growth) / 2
+        decel = yr1_growth < avg_prior * 0.7
+        check("Revenue deceleration", "Growth", not decel,
+              f"Latest: {yr1_growth:.1f}%, Prior avg: {avg_prior:.1f}%",
+              "Growth rate stable" if not decel else "Growth decelerating sharply vs prior average")
+
+    diluted_eps = get_value(fin, ["Diluted EPS"])
+    if len(diluted_eps) >= 3 and len(revenue) >= 3:
+        rev = revenue.iloc[:3]
+        eps = diluted_eps.iloc[:3]
+        rev_growth = (rev.iloc[0] - rev.iloc[2]) / rev.iloc[2] * 100
+        eps_growth = (eps.iloc[0] - eps.iloc[2]) / abs(eps.iloc[2]) * 100
+        passed = eps_growth >= rev_growth * 0.8
+        check("EPS vs revenue growth", "Growth", passed,
+              f"EPS growth: {eps_growth:.1f}%, Rev growth: {rev_growth:.1f}%",
+              "EPS keeping pace with revenue" if passed else "EPS lagging revenue — margin compression or dilution")
+
+    # --- CASH FLOW ---
+    fcf = get_value(cf, ["Free Cash Flow"])
+    ocf = get_value(cf, ["Operating Cash Flow"])
+
+    if len(fcf) >= 3 and len(net_income) >= 3:
+        fcf_3 = fcf.iloc[:3]
+        ni_3 = net_income.iloc[:3]
+        ratio = (fcf_3 / ni_3).mean()
+        passed = ratio >= 0.8
+        check("FCF vs net income quality", "Cash Flow", passed,
+              f"FCF/NI ratio: {ratio:.2f} (3Y avg)",
+              "FCF tracks net income well" if passed else "FCF significantly below net income — earnings quality concern")
+
+    if len(fcf) >= 3 and len(revenue) >= 3:
+        fcf_margin = (fcf.iloc[0] / revenue.iloc[0] * 100)
+        passed = fcf_margin >= 10
+        check("FCF margin", "Cash Flow", passed,
+              f"{fcf_margin:.1f}%",
+              "Healthy FCF margin above 10%" if passed else "FCF margin below 10% — limited financial flexibility")
+
+    if len(fcf) >= 3:
+        passed = fcf.iloc[0] > fcf.iloc[2]
+        check("FCF growth", "Cash Flow", passed,
+              f"${fcf.iloc[0]/1e9:.1f}B vs ${fcf.iloc[2]/1e9:.1f}B (3Y ago)",
+              "FCF growing over 3 years" if passed else "FCF shrinking over 3 years")
+
+    if len(ocf) >= 3:
+        all_positive = all(v > 0 for v in ocf.iloc[:3])
+        check("Operating cash flow positive", "Cash Flow", all_positive,
+              f"${ocf.iloc[0]/1e9:.1f}B latest",
+              "OCF positive all 3 years" if all_positive else "Negative OCF in at least one year")
+
+    # --- BALANCE SHEET ---
+    total_debt = get_value(bs, ["Total Debt"])
+    cash = get_value(bs, ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"])
+    interest_expense = get_value(fin, ["Interest Expense", "Interest Expense Non Operating"])
+
+    if len(total_debt) >= 1 and len(fcf) >= 1:
+        debt = total_debt.iloc[0]
+        fcf_latest = fcf.iloc[0]
+        if fcf_latest > 0:
+            ratio = debt / fcf_latest
+            passed = ratio < 3
+            check("Debt manageability", "Balance Sheet", passed,
+                  f"Debt/FCF: {ratio:.1f}x",
+                  "Debt manageable relative to FCF" if passed else f"High debt load at {ratio:.1f}x FCF")
+
+    if len(operating_income) >= 1 and len(interest_expense) >= 1:
+        oi = abs(operating_income.iloc[0])
+        ie = abs(interest_expense.iloc[0])
+        if ie > 0:
+            coverage = oi / ie
+            passed = coverage >= 3
+            check("Interest coverage", "Balance Sheet", passed,
+                  f"{coverage:.1f}x",
+                  f"Interest well covered at {coverage:.1f}x" if passed else f"Low interest coverage at {coverage:.1f}x")
+
+    # --- RED FLAGS ---
+    accounts_receivable = get_value(bs, ["Accounts Receivable", "Receivables"])
+    if len(accounts_receivable) >= 3 and len(revenue) >= 3:
+        ar_growth = (accounts_receivable.iloc[0] - accounts_receivable.iloc[2]) / accounts_receivable.iloc[2] * 100
+        rev_growth_3y = (revenue.iloc[0] - revenue.iloc[2]) / revenue.iloc[2] * 100
+        passed = ar_growth <= rev_growth_3y * 1.2
+        check("Receivables creep", "Red Flags", passed,
+              f"AR growth: {ar_growth:.1f}%, Rev growth: {rev_growth_3y:.1f}%",
+              "Receivables growing in line with revenue" if passed else "Receivables growing faster than revenue")
+
+    shares = get_value(fin, ["Diluted Average Shares", "Basic Average Shares"])
+    if len(shares) >= 3:
+        dilution = (shares.iloc[0] - shares.iloc[2]) / shares.iloc[2] * 100
+        passed = dilution <= 5
+        check("Dilution test", "Red Flags", passed,
+              f"Share count change: {dilution:+.1f}% over 3Y",
+              "Minimal dilution" if passed else f"Share count up {dilution:.1f}% — dilution concern")
+
+    capex = get_value(cf, ["Capital Expenditure", "Purchase Of PPE"])
+    if len(capex) >= 3 and len(revenue) >= 3:
+        capex_pct_now = abs(capex.iloc[0]) / revenue.iloc[0] * 100
+        capex_pct_prior = abs(capex.iloc[2]) / revenue.iloc[2] * 100
+        fcf_margin_now = fcf.iloc[0] / revenue.iloc[0] * 100 if len(fcf) >= 1 else None
+        fcf_margin_prior = fcf.iloc[2] / revenue.iloc[2] * 100 if len(fcf) >= 3 else None
+        if fcf_margin_now and fcf_margin_prior:
+            passed = not (capex_pct_now > capex_pct_prior and fcf_margin_now < fcf_margin_prior)
+            check("CapEx creep", "Red Flags", passed,
+                  f"CapEx%Rev: {capex_pct_now:.1f}% vs {capex_pct_prior:.1f}% (3Y ago)",
+                  "CapEx intensity stable" if passed else "Rising CapEx with falling FCF margin")
+
+    return results
+
+
+import warnings
+warnings.filterwarnings("ignore")
+
 st.set_page_config(page_title="Morning Brief", layout="wide")
 st.title("Morning Brief")
 st.caption("RSI signals + Claude analysis for your watchlist")
@@ -126,7 +299,7 @@ with st.sidebar:
     if run_button:
         save_watchlist(ticker_input)
 
-tab1, tab2 = st.tabs(["Watchlist", "Macro"])
+tab1, tab2, tab3 = st.tabs(["Watchlist", "Macro", "Health Check"])
 
 with tab2:
     st.subheader("Macro Dashboard")
@@ -611,3 +784,55 @@ Data:
 
     else:
         st.info("Configure your watchlist in the sidebar and click Run Analysis.")
+
+with tab3:
+    st.subheader("Financial Health Check")
+    st.caption("Runs profitability, growth, cash flow, balance sheet, and red flag tests on any ticker")
+
+    hc_ticker = st.text_input("Ticker", value="MSFT", key="hc_ticker").strip().upper()
+    hc_run = st.button("Run Health Check", type="primary")
+
+    if hc_run and hc_ticker:
+        with st.spinner(f"Fetching financials for {hc_ticker}..."):
+            try:
+                results = run_health_checks(hc_ticker)
+                st.session_state["hc_results"] = results
+                st.session_state["hc_ticker_done"] = hc_ticker
+            except Exception as e:
+                st.error(f"Could not run health check for {hc_ticker}: {e}")
+
+    if "hc_results" in st.session_state:
+        results = st.session_state["hc_results"]
+        done_ticker = st.session_state["hc_ticker_done"]
+
+        passes = sum(1 for r in results if r["result"] == "PASS")
+        flags = sum(1 for r in results if r["result"] == "FLAG")
+        total = len(results)
+        score = round(passes / total * 100) if total > 0 else 0
+
+        st.markdown(f"### {done_ticker} — Health Scorecard")
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            st.metric("Score", f"{score}%", help=f"{passes}/{total} tests passed")
+        with s2:
+            st.metric("Passed", passes)
+        with s3:
+            st.metric("Flagged", flags)
+
+        categories = ["Profitability", "Growth", "Cash Flow", "Balance Sheet", "Red Flags"]
+        for cat in categories:
+            cat_results = [r for r in results if r["category"] == cat]
+            if not cat_results:
+                continue
+            st.markdown(f"**{cat}**")
+            for r in cat_results:
+                icon = "✅" if r["result"] == "PASS" else "🚩"
+                with st.expander(f"{icon} {r['test']} — {r['value']}"):
+                    st.write(r["reason"])
+
+        flag_list = [r for r in results if r["result"] == "FLAG"]
+        if flag_list:
+            st.markdown("---")
+            st.markdown("**Flags to investigate**")
+            for r in flag_list:
+                st.warning(f"**{r['test']}**: {r['reason']}")
